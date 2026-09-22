@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">FitBudget</string>
+    <string name="app_tagline">₹100 a Day. Better Every Day.</string>
+
+    <!--
+      Notification channel names shown in Android system settings.
+      In-app copy lives next to the composables that render it; validation messages are produced
+      by the domain layer (Validators), which deliberately has no Android dependencies.
+    -->
+    <string name="channel_meals_name">Meal reminders</string>
+    <string name="channel_meals_desc">Breakfast, lunch, snack and dinner reminders</string>
+    <string name="channel_water_name">Water reminders</string>
+    <string name="channel_water_desc">Periodic hydration reminders</string>
+    <string name="channel_activity_name">Activity reminders</string>
+    <string name="channel_activity_desc">Workout and walking reminders</string>
+    <string name="channel_general_name">Daily reminders</string>
+    <string name="channel_general_desc">Weight check-in and sleep reminders</string>
+</resources>

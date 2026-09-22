@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Only the colours the Android platform needs outside Compose live here
+  (the splash window background). The app palette is defined in ui/theme/Color.kt.
+-->
+<resources>
+    <color name="splash_background_light">#FFF6FAF8</color>
+    <color name="splash_background_dark">#FF06231A</color>
+</resources>

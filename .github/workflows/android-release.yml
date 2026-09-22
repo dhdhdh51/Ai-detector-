@@ -1,0 +1,98 @@
+name: Android Release
+
+# Optional release pipeline.
+#
+#  * Triggered by pushing a tag like v1.0.0, or manually from the Actions tab.
+#  * Builds the release APK and uploads it as a workflow artifact.
+#  * When a signing keystore is configured in repository secrets it is used; otherwise the build
+#    falls back to the debug signing config defined in app/build.gradle.kts, so the workflow
+#    always produces an installable APK without any manual setup.
+#
+# To sign with your own key, add these repository secrets:
+#   KEYSTORE_BASE64      - base64 of your .jks file  (base64 -w0 release.jks)
+#   KEYSTORE_PASSWORD    - keystore password
+#   KEY_ALIAS            - key alias
+#   KEY_PASSWORD         - key password
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a GitHub release with the APK attached'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # Mapped at job level so the optional signing step can be skipped with an `env` check
+    # (the `secrets` context is not available in step-level `if` expressions).
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Decode signing keystore (optional)
+        if: ${{ env.KEYSTORE_BASE64 != '' }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "RELEASE_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Build release APK
+        env:
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Rename APK
+        run: |
+          mkdir -p artifacts
+          cp app/build/outputs/apk/release/app-release.apk artifacts/FitBudget-release.apk
+          ls -lh artifacts
+
+      - name: Upload release APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FitBudget-release.apk
+          path: artifacts/FitBudget-release.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/FitBudget-release.apk
+          generate_release_notes: true

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Only local app data is included in the OS backup the user already opted into.
+  Nothing is sent to FitBudget servers - the app has none. Caches are excluded by
+  simply not listing them.
+-->
+<full-backup-content>
+    <include domain="database" path="fitbudget.db" />
+    <include domain="sharedpref" path="." />
+    <include domain="file" path="datastore" />
+</full-backup-content>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+      Adaptive launcher icons must stay in `mipmap-anydpi-v26` even though minSdk is 26.
+      The version qualifier outranks the density qualifier during resource selection, which is what
+      makes the adaptive icon win over the legacy PNG fallbacks. Moving these files to plain
+      `mipmap-anydpi` makes them unreachable and AAPT2 strips them from the APK.
+      Lint's ObsoleteSdkInt check does not model that interaction.
+    -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>
