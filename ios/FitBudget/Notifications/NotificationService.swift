@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import UserNotifications
 import FitBudgetCore
 import OSLog
@@ -37,6 +38,7 @@ enum NotificationIdentifiers {
 /// after a restart or reboot without any background work from the app. The whole schedule is
 /// rebuilt from the database whenever a reminder changes, so it can never drift.
 @MainActor
+@Observable
 final class NotificationService {
 
     private static let logger = Logger(subsystem: "com.fitbudget.app", category: "Notifications")

@@ -71,18 +71,22 @@ final class AppStore {
     /// Transient banner message for the UI.
     var message: String?
 
+    /// Collaborators are built inside the initialiser rather than as default arguments: default
+    /// argument expressions are evaluated in a nonisolated context, which cannot call the
+    /// `@MainActor` initialisers of these services.
     init(
         container: ModelContainer,
-        settingsStore: SettingsStore = SettingsStore(),
-        notifications: NotificationService = NotificationService(),
-        pedometer: PedometerService = PedometerService()
+        settingsStore: SettingsStore? = nil,
+        notifications: NotificationService? = nil,
+        pedometer: PedometerService? = nil
     ) {
+        let resolvedSettingsStore = settingsStore ?? SettingsStore()
         self.container = container
         self.context = ModelContext(container)
-        self.settingsStore = settingsStore
-        self.notifications = notifications
-        self.pedometer = pedometer
-        self.settings = settingsStore.load()
+        self.settingsStore = resolvedSettingsStore
+        self.notifications = notifications ?? NotificationService()
+        self.pedometer = pedometer ?? PedometerService()
+        self.settings = resolvedSettingsStore.load()
     }
 
     // MARK: - Bootstrap

@@ -73,9 +73,7 @@ struct TrendLineChart: View {
             }
             .chartYScale(domain: bounds.min...bounds.max)
             .chartXAxis {
-                AxisMarks(preset: .aligned, values: .automatic(desiredCount: 4)) {
-                    AxisValueLabel(format: .dateTime.day().month(.abbreviated))
-                }
+                AxisMarks(values: .automatic(desiredCount: 4))
             }
             .chartYAxis {
                 AxisMarks(position: .leading, values: .automatic(desiredCount: 4))
@@ -115,9 +113,7 @@ struct DailyBarChart: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(preset: .aligned, values: .automatic(desiredCount: 4)) {
-                    AxisValueLabel(format: .dateTime.day().month(.abbreviated))
-                }
+                AxisMarks(values: .automatic(desiredCount: 4))
             }
             .chartYAxis {
                 AxisMarks(position: .leading, values: .automatic(desiredCount: 4))

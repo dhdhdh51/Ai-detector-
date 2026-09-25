@@ -255,10 +255,6 @@ struct RemindersView: View {
     }
 }
 
-extension ReminderKind: Identifiable {
-    public var id: String { rawValue }
-}
-
 struct ReminderTimeSheet: View {
 
     let kind: ReminderKind

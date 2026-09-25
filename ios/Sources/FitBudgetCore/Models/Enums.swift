@@ -193,7 +193,10 @@ public enum MealType: String, CaseIterable, Codable, Sendable {
 }
 
 /// The nine configurable reminders.
-public enum ReminderKind: String, CaseIterable, Codable, Sendable {
+public enum ReminderKind: String, CaseIterable, Codable, Sendable, Identifiable {
+
+    public var id: String { rawValue }
+
     case breakfast = "BREAKFAST"
     case lunch = "LUNCH"
     case snack = "SNACK"
