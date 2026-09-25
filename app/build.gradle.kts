@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -20,19 +22,34 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
-    // A real keystore is used when CI (or a developer) provides one through the environment.
-    // Otherwise the release build falls back to debug signing so that `assembleRelease` always
-    // produces an installable APK with no manual setup.
-    val releaseKeystorePath: String? = System.getenv("RELEASE_KEYSTORE")
-    val hasReleaseKeystore = !releaseKeystorePath.isNullOrBlank() && file(releaseKeystorePath).exists()
+    // Release signing is resolved from, in order of precedence:
+    //   1. environment variables (used by CI, fed from repository secrets), or
+    //   2. a local, git-ignored keystore.properties in the repo root (used by developers).
+    // When neither is present the release build falls back to debug signing so that
+    // `assembleRelease` always produces an installable APK with no manual setup.
+    val keystoreProperties = Properties().apply {
+        val file = rootProject.file("keystore.properties")
+        if (file.exists()) file.inputStream().use { load(it) }
+    }
+
+    fun signingValue(envName: String, propertyName: String): String? =
+        System.getenv(envName)?.takeIf { it.isNotBlank() }
+            ?: keystoreProperties.getProperty(propertyName)?.takeIf { it.isNotBlank() }
+
+    val releaseKeystorePath = signingValue("ANDROID_KEYSTORE_PATH", "storeFile")
+    val hasReleaseKeystore = releaseKeystorePath != null && file(releaseKeystorePath).exists()
 
     signingConfigs {
         create("release") {
             if (hasReleaseKeystore) {
                 storeFile = file(releaseKeystorePath!!)
-                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
-                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+                storePassword = signingValue("ANDROID_KEYSTORE_PASSWORD", "storePassword")
+                keyAlias = signingValue("ANDROID_KEY_ALIAS", "keyAlias")
+                keyPassword = signingValue("ANDROID_KEY_PASSWORD", "keyPassword")
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
             }
         }
     }
@@ -51,6 +68,10 @@ android {
             signingConfig = if (hasReleaseKeystore) {
                 signingConfigs.getByName("release")
             } else {
+                logger.lifecycle(
+                    "No release keystore configured - signing the release build with the debug key. " +
+                        "Run tools/setup-signing.sh to create and store a real key."
+                )
                 signingConfigs.getByName("debug")
             }
         }

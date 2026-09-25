@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
-Generates the legacy (pre-API-26) PNG launcher icons for FitBudget from the same
-original brand mark used by the adaptive vector icon.
+Generates every raster launcher icon for FitBudget from one original brand mark:
+
+  * Android legacy (pre-API-26) PNG mipmaps, square and round
+  * iOS AppIcon (1024x1024, fully opaque as the App Store requires)
+  * iOS launch-screen logo (used by UILaunchScreen)
+  * a docs/README asset
+
+The adaptive Android icon and the SwiftUI in-app logo are vectors and are not produced here.
 
 Requires Pillow:  pip install Pillow
 Usage:            python3 tools/generate_icons.py
@@ -10,7 +16,10 @@ import os
 
 from PIL import Image, ImageDraw
 
-RES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "src", "main", "res")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ANDROID_RES = os.path.join(ROOT, "app", "src", "main", "res")
+IOS_ASSETS = os.path.join(ROOT, "ios", "FitBudget", "Resources", "Assets.xcassets")
+DOCS = os.path.join(ROOT, "docs")
 
 DENSITIES = {
     "mipmap-mdpi": 48,
@@ -48,13 +57,18 @@ def gradient_square(size):
     return img
 
 
-def draw_mark(img, size):
+def draw_mark(img, size, scale=1.0):
     """Draws the F + coin mark on an existing square image."""
     d = ImageDraw.Draw(img)
-    u = size / 108.0  # brand mark is authored on a 108 unit grid
+    u = size / 108.0 * scale  # brand mark is authored on a 108 unit grid
+    offset = (size - size * scale) / 2
 
     def r(x0, y0, x1, y1, radius, fill):
-        d.rounded_rectangle([x0 * u, y0 * u, x1 * u, y1 * u], radius=radius * u, fill=fill)
+        d.rounded_rectangle(
+            [x0 * u + offset, y0 * u + offset, x1 * u + offset, y1 * u + offset],
+            radius=radius * u,
+            fill=fill,
+        )
 
     # F stem + arms (shifted slightly left/up to balance the coin)
     r(24, 24, 37, 82, 4, WHITE)
@@ -65,22 +79,30 @@ def draw_mark(img, size):
     r(68, 20, 78, 39, 3, AMBER)
 
     # Coin
-    cx, cy, rad = 68 * u, 68 * u, 15 * u
+    cx, cy, rad = 68 * u + offset, 68 * u + offset, 15 * u
     d.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill=AMBER)
     rad2 = 11 * u
     d.ellipse([cx - rad2, cy - rad2, cx + rad2, cy + rad2], fill=AMBER_LIGHT)
 
     # Rupee glyph
     w = max(int(2.4 * u), 1)
-    d.line([(61 * u, 63 * u), (75 * u, 63 * u)], fill=AMBER_DARK, width=w)
-    d.line([(61 * u, 67.5 * u), (75 * u, 67.5 * u)], fill=AMBER_DARK, width=w)
-    d.arc([63 * u, 66 * u, 75 * u, 78 * u], start=-80, end=80, fill=AMBER_DARK, width=w)
-    d.line([(64 * u, 74 * u), (73 * u, 82 * u)], fill=AMBER_DARK, width=w)
+    d.line([(61 * u + offset, 63 * u + offset), (75 * u + offset, 63 * u + offset)], fill=AMBER_DARK, width=w)
+    d.line([(61 * u + offset, 67.5 * u + offset), (75 * u + offset, 67.5 * u + offset)], fill=AMBER_DARK, width=w)
+    d.arc(
+        [63 * u + offset, 66 * u + offset, 75 * u + offset, 78 * u + offset],
+        start=-80, end=80, fill=AMBER_DARK, width=w,
+    )
+    d.line([(64 * u + offset, 74 * u + offset), (73 * u + offset, 82 * u + offset)], fill=AMBER_DARK, width=w)
 
 
-def make_icon(size, round_icon=False):
+def make_icon(size, round_icon=False, squircle=True, scale=1.0):
     big = size * SS
     base = gradient_square(big)
+    draw_mark(base, big, scale=scale)
+
+    if not squircle and not round_icon:
+        # Fully opaque square: what the iOS App Store requires (the OS masks it itself).
+        return base.convert("RGB").resize((size, size), Image.LANCZOS)
 
     mask = Image.new("L", (big, big), 0)
     md = ImageDraw.Draw(mask)
@@ -89,27 +111,51 @@ def make_icon(size, round_icon=False):
     else:
         md.rounded_rectangle([0, 0, big - 1, big - 1], radius=int(big * 0.22), fill=255)
 
-    draw_mark(base, big)
-
     out = Image.new("RGBA", (big, big), (0, 0, 0, 0))
     out.paste(base, (0, 0), mask)
     return out.resize((size, size), Image.LANCZOS)
 
 
-def main():
-    for folder, size in DENSITIES.items():
-        target = os.path.join(RES, folder)
-        os.makedirs(target, exist_ok=True)
-        make_icon(size, False).save(os.path.join(target, "ic_launcher.png"))
-        make_icon(size, True).save(os.path.join(target, "ic_launcher_round.png"))
-        print("wrote", folder, size)
+def make_launch_logo(size):
+    """Transparent-background mark for the iOS launch screen."""
+    big = size * SS
+    canvas = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    badge = Image.new("RGBA", (big, big))
+    bd = ImageDraw.Draw(badge)
+    bd.rounded_rectangle([0, 0, big - 1, big - 1], radius=int(big * 0.24), fill=(0, 135, 90, 255))
+    draw_mark(badge, big, scale=0.82)
+    mask = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, big - 1, big - 1], radius=int(big * 0.24), fill=255)
+    canvas.paste(badge, (0, 0), mask)
+    return canvas.resize((size, size), Image.LANCZOS)
 
-    # A larger marketing/README asset
-    docs = os.path.join(os.path.dirname(RES), "..", "..", "..", "docs")
-    docs = os.path.normpath(docs)
-    os.makedirs(docs, exist_ok=True)
-    make_icon(512, False).save(os.path.join(docs, "fitbudget-icon.png"))
-    print("wrote", os.path.join(docs, "fitbudget-icon.png"))
+
+def main():
+    # ---- Android legacy mipmaps ----
+    for folder, size in DENSITIES.items():
+        target = os.path.join(ANDROID_RES, folder)
+        os.makedirs(target, exist_ok=True)
+        make_icon(size, round_icon=False).save(os.path.join(target, "ic_launcher.png"))
+        make_icon(size, round_icon=True).save(os.path.join(target, "ic_launcher_round.png"))
+        print("android:", folder, size)
+
+    # ---- iOS app icon (opaque, single size) ----
+    appicon = os.path.join(IOS_ASSETS, "AppIcon.appiconset")
+    os.makedirs(appicon, exist_ok=True)
+    make_icon(1024, squircle=False).save(os.path.join(appicon, "AppIcon-1024.png"))
+    print("ios: AppIcon-1024.png")
+
+    # ---- iOS launch screen logo ----
+    launch = os.path.join(IOS_ASSETS, "LaunchLogo.imageset")
+    os.makedirs(launch, exist_ok=True)
+    for scale, name in ((1, "LaunchLogo.png"), (2, "LaunchLogo@2x.png"), (3, "LaunchLogo@3x.png")):
+        make_launch_logo(160 * scale).save(os.path.join(launch, name))
+    print("ios: LaunchLogo @1x/@2x/@3x")
+
+    # ---- shared docs asset ----
+    os.makedirs(DOCS, exist_ok=True)
+    make_icon(512).save(os.path.join(DOCS, "fitbudget-icon.png"))
+    print("docs: fitbudget-icon.png")
 
 
 if __name__ == "__main__":

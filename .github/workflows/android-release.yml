@@ -1,43 +1,37 @@
 name: Android Release
 
-# Optional release pipeline.
+# Builds a signed, Play-ready release APK and AAB.
 #
 #  * Triggered by pushing a tag like v1.0.0, or manually from the Actions tab.
-#  * Builds the release APK and uploads it as a workflow artifact.
-#  * When a signing keystore is configured in repository secrets it is used; otherwise the build
-#    falls back to the debug signing config defined in app/build.gradle.kts, so the workflow
-#    always produces an installable APK without any manual setup.
+#  * Signing material comes from repository secrets created by tools/setup-signing.sh:
 #
-# To sign with your own key, add these repository secrets:
-#   KEYSTORE_BASE64      - base64 of your .jks file  (base64 -w0 release.jks)
-#   KEYSTORE_PASSWORD    - keystore password
-#   KEY_ALIAS            - key alias
-#   KEY_PASSWORD         - key password
+#      ANDROID_KEYSTORE_BASE64    base64 of your .jks   (base64 -w0 release.jks)
+#      ANDROID_KEYSTORE_PASSWORD  keystore password
+#      ANDROID_KEY_ALIAS          key alias
+#      ANDROID_KEY_PASSWORD       key password
+#
+#  * With no secrets the build still succeeds and falls back to debug signing, so the pipeline is
+#    never red just because signing is not configured yet. Such artifacts are for testing only.
 
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      create_release:
-        description: 'Create a GitHub release with the APK attached'
-        required: false
-        default: 'false'
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: Build release APK
+    name: Build signed release
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
-    # Mapped at job level so the optional signing step can be skipped with an `env` check
+    # Mapped at job level so the optional signing steps can use an `env` check
     # (the `secrets` context is not available in step-level `if` expressions).
     env:
-      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
 
     steps:
       - name: Check out repository
@@ -60,29 +54,34 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Decode signing keystore (optional)
-        if: ${{ env.KEYSTORE_BASE64 != '' }}
+      - name: Decode signing keystore
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
-          echo "RELEASE_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "Keystore decoded ($(stat -c%s "$RUNNER_TEMP/release.jks") bytes)"
 
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --stacktrace
 
-      - name: Build release APK
+      - name: Build release APK and AAB
         env:
-          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease --stacktrace
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease :app:bundleRelease --stacktrace
 
-      - name: Rename APK
+      - name: Verify signature
         run: |
           mkdir -p artifacts
           cp app/build/outputs/apk/release/app-release.apk artifacts/FitBudget-release.apk
+          cp app/build/outputs/bundle/release/app-release.aab artifacts/FitBudget-release.aab
+
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          "$BUILD_TOOLS/apksigner" verify --print-certs artifacts/FitBudget-release.apk
           ls -lh artifacts
 
-      - name: Upload release APK artifact
+      - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
           name: FitBudget-release.apk
@@ -90,9 +89,19 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Publish GitHub release
+      - name: Upload Play bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: FitBudget-release.aab
+          path: artifacts/FitBudget-release.aab
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attach to GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/FitBudget-release.apk
+          files: |
+            artifacts/FitBudget-release.apk
+            artifacts/FitBudget-release.aab
           generate_release_notes: true

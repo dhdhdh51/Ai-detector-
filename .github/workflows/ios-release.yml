@@ -1,0 +1,237 @@
+name: iOS Release
+
+# Builds a signed, App Store-ready IPA.
+#
+#  * Triggered by pushing a tag like v1.0.0, or manually from the Actions tab.
+#  * Signing material comes from repository secrets created by tools/setup-signing.sh:
+#
+#      Manual signing            Automatic signing (Xcode manages certificates)
+#      ----------------------    ---------------------------------------------
+#      IOS_TEAM_ID               IOS_TEAM_ID
+#      IOS_CERTIFICATE_P12_BASE64        APPSTORE_API_PRIVATE_KEY
+#      IOS_CERTIFICATE_PASSWORD          APPSTORE_API_KEY_ID
+#      IOS_PROVISIONING_PROFILE_BASE64   APPSTORE_API_ISSUER_ID
+#      IOS_KEYCHAIN_PASSWORD
+#
+#  * With no secrets at all the job still runs and produces an UNSIGNED archive, so the
+#    pipeline is never red just because signing is not configured yet.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build signed IPA
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    env:
+      IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+      IOS_CERTIFICATE_P12_BASE64: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+      APPSTORE_API_PRIVATE_KEY: ${{ secrets.APPSTORE_API_PRIVATE_KEY }}
+      APPSTORE_API_KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+      APPSTORE_API_ISSUER_ID: ${{ secrets.APPSTORE_API_ISSUER_ID }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Test shared core
+        working-directory: ios
+        run: swift test
+
+      - name: Decide signing mode
+        id: mode
+        run: |
+          if [ -n "$IOS_CERTIFICATE_P12_BASE64" ] && [ -n "$IOS_PROVISIONING_PROFILE_BASE64" ]; then
+            echo "mode=manual" >> "$GITHUB_OUTPUT"
+          elif [ -n "$APPSTORE_API_PRIVATE_KEY" ] && [ -n "$IOS_TEAM_ID" ]; then
+            echo "mode=automatic" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=unsigned" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Signing mode: $(grep mode= "$GITHUB_OUTPUT" | cut -d= -f2)"
+
+      - name: Import certificate and profile
+        if: steps.mode.outputs.mode == 'manual'
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/fitbudget-signing.keychain-db"
+          KEYCHAIN_PASS="${IOS_KEYCHAIN_PASSWORD:-$(uuidgen)}"
+
+          echo "$IOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/profile.mobileprovision"
+
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -P "$IOS_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+
+          PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+          mkdir -p "$PROFILE_DIR"
+          UUID="$(security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" \
+            | plutil -extract UUID raw -o - -)"
+          cp "$RUNNER_TEMP/profile.mobileprovision" "$PROFILE_DIR/$UUID.mobileprovision"
+          echo "PROVISIONING_PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
+          echo "Imported profile $UUID"
+
+      - name: Write App Store Connect API key
+        if: steps.mode.outputs.mode == 'automatic'
+        run: |
+          KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          mkdir -p "$KEY_DIR"
+          printf '%s' "$APPSTORE_API_PRIVATE_KEY" > "$KEY_DIR/AuthKey_${APPSTORE_API_KEY_ID}.p8"
+          echo "Wrote AuthKey_${APPSTORE_API_KEY_ID}.p8"
+
+      - name: Write ExportOptions.plist
+        run: |
+          cd ios
+          if [ "${{ steps.mode.outputs.mode }}" = "manual" ]; then
+            SIGNING_STYLE=manual
+          else
+            SIGNING_STYLE=automatic
+          fi
+          cat > ExportOptions.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>${IOS_TEAM_ID}</string>
+            <key>signingStyle</key>
+            <string>${SIGNING_STYLE}</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>uploadSymbols</key>
+            <true/>
+            <key>destination</key>
+            <string>export</string>
+          </dict>
+          </plist>
+          PLIST
+          plutil -lint ExportOptions.plist
+
+      - name: Archive
+        working-directory: ios
+        run: |
+          set -o pipefail
+          MODE="${{ steps.mode.outputs.mode }}"
+          COMMON=(
+            -project FitBudget.xcodeproj
+            -scheme FitBudget
+            -configuration Release
+            -destination 'generic/platform=iOS'
+            -archivePath "$RUNNER_TEMP/FitBudget.xcarchive"
+          )
+
+          if [ "$MODE" = "manual" ]; then
+            xcodebuild archive "${COMMON[@]}" \
+              CODE_SIGN_STYLE=Manual \
+              DEVELOPMENT_TEAM="$IOS_TEAM_ID" \
+              PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_UUID"
+          elif [ "$MODE" = "automatic" ]; then
+            xcodebuild archive "${COMMON[@]}" \
+              -allowProvisioningUpdates \
+              -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${APPSTORE_API_KEY_ID}.p8" \
+              -authenticationKeyID "$APPSTORE_API_KEY_ID" \
+              -authenticationKeyIssuerID "$APPSTORE_API_ISSUER_ID" \
+              DEVELOPMENT_TEAM="$IOS_TEAM_ID"
+          else
+            echo "::warning::No iOS signing secrets found - producing an unsigned archive."
+            xcodebuild archive "${COMMON[@]}" \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGN_IDENTITY=""
+          fi
+
+      - name: Export IPA
+        if: steps.mode.outputs.mode != 'unsigned'
+        working-directory: ios
+        run: |
+          set -o pipefail
+          EXPORT_ARGS=(
+            -exportArchive
+            -archivePath "$RUNNER_TEMP/FitBudget.xcarchive"
+            -exportPath "$RUNNER_TEMP/export"
+            -exportOptionsPlist ExportOptions.plist
+          )
+          if [ "${{ steps.mode.outputs.mode }}" = "automatic" ]; then
+            EXPORT_ARGS+=(
+              -allowProvisioningUpdates
+              -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${APPSTORE_API_KEY_ID}.p8"
+              -authenticationKeyID "$APPSTORE_API_KEY_ID"
+              -authenticationKeyIssuerID "$APPSTORE_API_ISSUER_ID"
+            )
+          fi
+          xcodebuild "${EXPORT_ARGS[@]}"
+
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          IPA="$(find "$RUNNER_TEMP/export" -name '*.ipa' -print -quit)"
+          test -n "$IPA" || { echo "No IPA produced"; exit 1; }
+          cp "$IPA" "$GITHUB_WORKSPACE/artifacts/FitBudget-release.ipa"
+          ls -lh "$GITHUB_WORKSPACE/artifacts"
+
+      - name: Package unsigned archive
+        if: steps.mode.outputs.mode == 'unsigned'
+        run: |
+          mkdir -p artifacts
+          cd "$RUNNER_TEMP"
+          zip -qry "$GITHUB_WORKSPACE/artifacts/FitBudget-unsigned.xcarchive.zip" FitBudget.xcarchive
+          ls -lh "$GITHUB_WORKSPACE/artifacts"
+
+      - name: Upload signed IPA
+        if: steps.mode.outputs.mode != 'unsigned'
+        uses: actions/upload-artifact@v4
+        with:
+          name: FitBudget-release.ipa
+          path: artifacts/FitBudget-release.ipa
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload unsigned archive
+        if: steps.mode.outputs.mode == 'unsigned'
+        uses: actions/upload-artifact@v4
+        with:
+          name: FitBudget-ios-unsigned-archive
+          path: artifacts/FitBudget-unsigned.xcarchive.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Clean up keychain
+        if: always() && steps.mode.outputs.mode == 'manual'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/fitbudget-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/profile.mobileprovision"
+
+      - name: Attach to GitHub release
+        if: startsWith(github.ref, 'refs/tags/v') && steps.mode.outputs.mode != 'unsigned'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/FitBudget-release.ipa
+          generate_release_notes: true

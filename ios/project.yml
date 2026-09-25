@@ -1,0 +1,76 @@
+# XcodeGen specification for the FitBudget iOS app.
+#
+# The Xcode project is generated, never committed, so there is no .pbxproj to merge-conflict and
+# CI can build from a clean checkout with:
+#
+#   brew install xcodegen && cd ios && xcodegen generate
+#
+name: FitBudget
+
+options:
+  bundleIdPrefix: com.fitbudget
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  generateEmptyDirectories: false
+
+settings:
+  base:
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_STRICT_CONCURRENCY: minimal
+    # Signing is supplied by CI (or Xcode) rather than hardcoded, so the project builds for
+    # anyone who checks it out.
+    CODE_SIGN_STYLE: Automatic
+
+packages:
+  FitBudgetCore:
+    path: .
+
+targets:
+  FitBudget:
+    type: application
+    platform: iOS
+    sources:
+      - path: FitBudget
+    dependencies:
+      - package: FitBudgetCore
+        product: FitBudgetCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.fitbudget.app
+        PRODUCT_NAME: FitBudget
+        INFOPLIST_FILE: FitBudget/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        SWIFT_EMIT_LOC_STRINGS: YES
+        ENABLE_PREVIEWS: YES
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_COMPILATION_MODE: wholemodule
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+          VALIDATE_PRODUCT: YES
+
+schemes:
+  FitBudget:
+    build:
+      targets:
+        FitBudget: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+    profile:
+      config: Release
+    analyze:
+      config: Debug

@@ -9,7 +9,28 @@ captures/
 .cxx
 *.apk
 *.aab
-*.keystore
-!debug.keystore
 app/release/
 app/debug/
+
+# ---- Signing material: never commit private keys ----
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+*.cer
+*.certSigningRequest
+keystore.properties
+signing/
+AuthKey_*.p8
+
+# ---- iOS ----
+ios/FitBudget.xcodeproj/
+ios/FitBudget.xcworkspace/
+ios/.build/
+ios/build/
+ios/DerivedData/
+ios/*.xcarchive
+ios/*.ipa
+ios/ExportOptions.plist
+.swiftpm/
+xcuserdata/
